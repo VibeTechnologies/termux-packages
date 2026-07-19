@@ -49,42 +49,48 @@ jobs:
       - name: Install extra Android SDK components (for termux-am APK)
         run: |
           # termux-am v0.8.0 builds its APK with AGP 7.4.2 against
-          # platforms;android-33 + build-tools;30.0.3. The package-builder image
-          # only pre-installs newer platforms/build-tools (android-35/28/24,
-          # build-tools 37.0.0) which AGP 7.4.2 can't use, and AGP's on-the-fly
-          # auto-download fails in CI with "Failed to read or create install
-          # properties file" because the SDK dir isn't writable by the build
-          # user. Fix: chown the SDK to the builder user, point sdkmanager at a
-          # writable ANDROID_USER_HOME, install the exact versions, and hard-assert
-          # they landed so any failure surfaces here (not later inside gradle).
-          # Runs in the same persistent container that the build step reuses.
+          # platforms;android-33 + build-tools;30.0.3. The package-builder image's
+          # pre-installed SDK is root-owned and the container's restricted AppArmor
+          # profile blocks `sudo chown`, so sdkmanager can't write into it ("Failed
+          # to read or create install properties file"). Instead, provision a fresh,
+          # fully writable SDK under $HOME with its own commandline-tools and install
+          # exactly the components termux-am needs. The build step below is pointed at
+          # this SDK via ANDROID_HOME/ANDROID_SDK_ROOT env injection. Runs in the same
+          # persistent container the build step reuses, so $HOME/android-sdk persists.
           ./scripts/run-docker.sh bash -c '
             set -eux
-            SDK_ROOT="$(ls -d /home/builder/lib/android-sdk-* 2>/dev/null | head -n1)"
-            : "${SDK_ROOT:?Android SDK not found in image}"
-            # Ensure the build user can write the SDK dir (root of the install failure).
-            sudo chown -R "$(id -u):$(id -g)" "$SDK_ROOT" || true
-            export ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT="$SDK_ROOT"
+            export ANDROID_SDK_ROOT="$HOME/android-sdk"
+            export ANDROID_HOME="$ANDROID_SDK_ROOT"
             export ANDROID_USER_HOME="$HOME/.android"
-            mkdir -p "$ANDROID_USER_HOME"
-            SDKMGR="$(ls "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager \
-                          "$SDK_ROOT"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)"
-            : "${SDKMGR:?sdkmanager not found}"
-            echo "SDK_ROOT=$SDK_ROOT SDKMGR=$SDKMGR ANDROID_USER_HOME=$ANDROID_USER_HOME"
-            yes | "$SDKMGR" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
-            "$SDKMGR" --sdk_root="$SDK_ROOT" "platforms;android-33" "build-tools;30.0.3"
-            echo "=== installed platforms ==="; ls "$SDK_ROOT/platforms"
-            echo "=== installed build-tools ==="; ls "$SDK_ROOT/build-tools"
-            # Hard assertion: fail this step (with a clear message) if the exact
-            # versions termux-am needs are still missing.
-            test -d "$SDK_ROOT/platforms/android-33" \
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" "$ANDROID_USER_HOME"
+            cd "$ANDROID_SDK_ROOT"
+            curl -fsSLo cmdtools.zip \
+              https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q cmdtools.zip -d cmdline-tools
+            # sdkmanager expects to live in cmdline-tools/latest/bin
+            rm -rf cmdline-tools/latest
+            mv cmdline-tools/cmdline-tools cmdline-tools/latest
+            SDKMGR="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+            yes | "$SDKMGR" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
+            "$SDKMGR" --sdk_root="$ANDROID_SDK_ROOT" \
+              "platform-tools" "platforms;android-33" "build-tools;30.0.3"
+            echo "=== platforms ==="; ls "$ANDROID_SDK_ROOT/platforms"
+            echo "=== build-tools ==="; ls "$ANDROID_SDK_ROOT/build-tools"
+            # Hard assert so any failure surfaces here, not later inside gradle.
+            test -d "$ANDROID_SDK_ROOT/platforms/android-33" \
               || { echo "ERROR: platforms;android-33 not installed" >&2; exit 1; }
-            test -d "$SDK_ROOT/build-tools/30.0.3" \
+            test -d "$ANDROID_SDK_ROOT/build-tools/30.0.3" \
               || { echo "ERROR: build-tools;30.0.3 not installed" >&2; exit 1; }
-            echo "Android SDK components ready"
+            echo "Android SDK ready at $ANDROID_SDK_ROOT"
           '
 
       - name: Build bootstrap archive from source (${{ matrix.arch }})
+        env:
+          # Point termux-am's gradle build (via its `export ANDROID_HOME`) at the
+          # writable SDK provisioned above, overriding the image's root-owned SDK.
+          TERMUX_DOCKER_EXEC_EXTRA_ARGS: >-
+            --env ANDROID_HOME=/home/builder/android-sdk
+            --env ANDROID_SDK_ROOT=/home/builder/android-sdk
         run: |
           ./scripts/run-docker.sh ./scripts/build-bootstraps.sh -f --architectures ${{ matrix.arch }}
 

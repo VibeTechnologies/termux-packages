@@ -46,6 +46,28 @@ jobs:
         run: |
           grep -n 'TERMUX_APP__PACKAGE_NAME=' scripts/properties.sh | head -n 2
 
+      - name: Install extra Android SDK components (for termux-am APK)
+        run: |
+          # The package-builder image pre-installs platforms;android-35/28/24 and
+          # build-tools 37.0.0, but termux-am v0.8.0 builds its APK against
+          # platforms;android-33 + build-tools;30.0.3. Android Gradle Plugin's
+          # on-the-fly SDK auto-download is unreliable in CI ("Failed to read or
+          # create install properties file"), so install them explicitly via
+          # sdkmanager into the same persistent build container that the next
+          # step (run-docker.sh) reuses.
+          ./scripts/run-docker.sh bash -c '
+            set -eu
+            SDK_ROOT="$(ls -d /home/builder/lib/android-sdk-* 2>/dev/null | head -n1)"
+            echo "SDK_ROOT=$SDK_ROOT"
+            SDKMGR="$(ls "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager \
+                          "$SDK_ROOT"/cmdline-tools/bin/sdkmanager 2>/dev/null | head -n1)"
+            echo "SDKMGR=$SDKMGR"
+            yes | "$SDKMGR" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
+            "$SDKMGR" --sdk_root="$SDK_ROOT" "platforms;android-33" "build-tools;30.0.3"
+            echo "=== installed platforms ==="; ls "$SDK_ROOT/platforms"
+            echo "=== installed build-tools ==="; ls "$SDK_ROOT/build-tools"
+          '
+
       - name: Build bootstrap archive from source (${{ matrix.arch }})
         run: |
           ./scripts/run-docker.sh ./scripts/build-bootstraps.sh -f --architectures ${{ matrix.arch }}

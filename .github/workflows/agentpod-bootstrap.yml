@@ -48,24 +48,40 @@ jobs:
 
       - name: Install extra Android SDK components (for termux-am APK)
         run: |
-          # The package-builder image pre-installs platforms;android-35/28/24 and
-          # build-tools 37.0.0, but termux-am v0.8.0 builds its APK against
-          # platforms;android-33 + build-tools;30.0.3. Android Gradle Plugin's
-          # on-the-fly SDK auto-download is unreliable in CI ("Failed to read or
-          # create install properties file"), so install them explicitly via
-          # sdkmanager into the same persistent build container that the next
-          # step (run-docker.sh) reuses.
+          # termux-am v0.8.0 builds its APK with AGP 7.4.2 against
+          # platforms;android-33 + build-tools;30.0.3. The package-builder image
+          # only pre-installs newer platforms/build-tools (android-35/28/24,
+          # build-tools 37.0.0) which AGP 7.4.2 can't use, and AGP's on-the-fly
+          # auto-download fails in CI with "Failed to read or create install
+          # properties file" because the SDK dir isn't writable by the build
+          # user. Fix: chown the SDK to the builder user, point sdkmanager at a
+          # writable ANDROID_USER_HOME, install the exact versions, and hard-assert
+          # they landed so any failure surfaces here (not later inside gradle).
+          # Runs in the same persistent container that the build step reuses.
           ./scripts/run-docker.sh bash -c '
-            set -eu
+            set -eux
             SDK_ROOT="$(ls -d /home/builder/lib/android-sdk-* 2>/dev/null | head -n1)"
-            echo "SDK_ROOT=$SDK_ROOT"
+            : "${SDK_ROOT:?Android SDK not found in image}"
+            # Ensure the build user can write the SDK dir (root of the install failure).
+            sudo chown -R "$(id -u):$(id -g)" "$SDK_ROOT" || true
+            export ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT="$SDK_ROOT"
+            export ANDROID_USER_HOME="$HOME/.android"
+            mkdir -p "$ANDROID_USER_HOME"
             SDKMGR="$(ls "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager \
-                          "$SDK_ROOT"/cmdline-tools/bin/sdkmanager 2>/dev/null | head -n1)"
-            echo "SDKMGR=$SDKMGR"
+                          "$SDK_ROOT"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)"
+            : "${SDKMGR:?sdkmanager not found}"
+            echo "SDK_ROOT=$SDK_ROOT SDKMGR=$SDKMGR ANDROID_USER_HOME=$ANDROID_USER_HOME"
             yes | "$SDKMGR" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
             "$SDKMGR" --sdk_root="$SDK_ROOT" "platforms;android-33" "build-tools;30.0.3"
             echo "=== installed platforms ==="; ls "$SDK_ROOT/platforms"
             echo "=== installed build-tools ==="; ls "$SDK_ROOT/build-tools"
+            # Hard assertion: fail this step (with a clear message) if the exact
+            # versions termux-am needs are still missing.
+            test -d "$SDK_ROOT/platforms/android-33" \
+              || { echo "ERROR: platforms;android-33 not installed" >&2; exit 1; }
+            test -d "$SDK_ROOT/build-tools/30.0.3" \
+              || { echo "ERROR: build-tools;30.0.3 not installed" >&2; exit 1; }
+            echo "Android SDK components ready"
           '
 
       - name: Build bootstrap archive from source (${{ matrix.arch }})

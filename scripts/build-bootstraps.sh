@@ -397,7 +397,10 @@ main() {
 		termux_step_handle_buildarch
 
 		if [[ $FORCE_BUILD_PACKAGES == "1" ]]; then
-			rm -f "$TERMUX_BUILT_PACKAGES_DIRECTORY_FOR_ARCH"/*
+			# NOTE: use the correct variable name. The historical
+			# `TERMUX_BUILT_PACKAGES_DIRECTORY_FOR_ARCH` is never defined, which made
+			# this expand to `rm -f /*` and abort the build under `set -e`.
+			[ -n "$TERMUX_BUILT_PACKAGES_DIRECTORY" ] && rm -f "$TERMUX_BUILT_PACKAGES_DIRECTORY"/*
 			rm -f "$TERMUX_BUILT_DEBS_DIRECTORY"/*
 		fi
 

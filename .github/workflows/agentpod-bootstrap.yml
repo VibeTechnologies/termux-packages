@@ -92,11 +92,11 @@ jobs:
             --env ANDROID_HOME=/home/builder/android-sdk
             --env ANDROID_SDK_ROOT=/home/builder/android-sdk
         run: |
-          # build-bootstraps.sh mv's the final zip into the repo root, which the
-          # in-container builder uid cannot write (host checkout is owned by a
-          # different uid). Make the root writable so the mv lands the artifact.
-          chmod 777 "$PWD"
           ./scripts/run-docker.sh ./scripts/build-bootstraps.sh -f --architectures ${{ matrix.arch }}
+          # build-bootstraps.sh leaves the zip in the container home dir because
+          # the mounted repo root isn't writable by the container's builder uid.
+          # Extract it with docker cp (daemon-privileged, mount-perm-agnostic).
+          sudo docker cp "termux-package-builder:/home/builder/bootstrap-${{ matrix.arch }}.zip" "$PWD/bootstrap-${{ matrix.arch }}.zip"
           test -f "bootstrap-${{ matrix.arch }}.zip"
 
       - name: Verify prefix baked into artifacts (${{ matrix.arch }})

@@ -246,7 +246,10 @@ create_bootstrap_archive() {
 		zip -r9 "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" ./*
 	)
 
-	mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/"
+	# The mounted repo root (TERMUX_PACKAGES_DIRECTORY) is not writable by the
+	# container's builder uid on CI, so land the artifact in the container home
+	# dir (always writable) and let the workflow extract it via `docker cp`.
+	mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$(dirname "$TERMUX_PACKAGES_DIRECTORY")/bootstrap-${1}.zip"
 
 	echo "[*] Finished successfully (${1})."
 

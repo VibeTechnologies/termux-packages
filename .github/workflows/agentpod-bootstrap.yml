@@ -1,7 +1,7 @@
 name: Agentpod bootstrap archives (from source)
 
 # Builds Termux bootstrap archives FROM SOURCE (not prebuilt debs) for the
-# custom Android app prefix /data/data/cc.agentlabs.agentpod/files/usr.
+# custom Android app prefix /data/data/cc.agentlabs.openclaw/files/usr.
 # The prefix is baked in at compile time via TERMUX_APP__PACKAGE_NAME in
 # scripts/properties.sh, so all ELF RUNPATHs and script shebangs point at the
 # agentpod prefix instead of com.termux.
@@ -108,7 +108,7 @@ jobs:
             echo "ERROR: RUNPATH still references com.termux" >&2
             exit 1
           fi
-          if ! echo "$runpath" | grep -q '/data/data/cc.agentlabs.agentpod/files/usr/lib'; then
+          if ! echo "$runpath" | grep -q '/data/data/cc.agentlabs.openclaw/files/usr/lib'; then
             echo "ERROR: RUNPATH does not reference agentpod prefix" >&2
             exit 1
           fi
@@ -116,7 +116,7 @@ jobs:
           sec="$(find _verify -name 'termux-bootstrap-second-stage.sh' | head -n1)"
           if [ -n "$sec" ]; then
             head -n 1 "$sec"
-            head -n 1 "$sec" | grep -q '/data/data/cc.agentlabs.agentpod/files/usr' || {
+            head -n 1 "$sec" | grep -q '/data/data/cc.agentlabs.openclaw/files/usr' || {
               echo "ERROR: second-stage shebang/prefix wrong" >&2; exit 1; }
           fi
           echo "=== sample ELF interpreter/shebang scan for com.termux ==="
